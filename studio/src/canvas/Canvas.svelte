@@ -548,13 +548,13 @@
 			{#if panel === 'lens'}
 				<svg
 					class="lens-dot"
-					width="5"
-					height="5"
+					width="10"
+					height="10"
 					aria-hidden="true"
 					style:left={pctX(lens.x)}
 					style:top={pctY(lens.y)}
 				>
-					<path d="M2.5 0v5M0 2.5h5" stroke="red" />
+					<path d="M5 0v10M0 5h10" stroke="red" shape-rendering="crispEdges" />
 				</svg>
 			{/if}
 		</div>
@@ -591,10 +591,6 @@
 						/>
 					{/each}
 				</div>
-				<svg class="lens-mark" width="33" height="33" fill="none" aria-hidden="true">
-					<path d="M16.5 4v25M4 16.5h25" stroke="#fff" stroke-width="3" />
-					<path d="M16.5 4v25M4 16.5h25" stroke="#000" />
-				</svg>
 				<div class="joystick">
 					{#each LENS_BUTTONS as [key, label, glyph] (key)}
 						<button
@@ -909,12 +905,6 @@
 		color: #fff;
 	}
 
-	.lens-mark {
-		position: absolute;
-		top: 50%;
-		left: 50%;
-		transform: translate(-50%, -50%);
-	}
 
 	label {
 		display: flex;
