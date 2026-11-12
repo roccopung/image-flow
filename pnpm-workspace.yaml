@@ -1,0 +1,4 @@
+packages:
+  - studio
+  - sveltekit-app
+  - proto

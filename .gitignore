@@ -1,0 +1,32 @@
+# Dependencies
+node_modules
+
+# Build output (any package)
+build
+dist
+.svelte-kit
+.sanity
+.output
+.vercel
+.netlify
+.wrangler
+
+# Env
+.env
+.env.*
+!.env.example
+!.env.test
+
+# Vite
+vite.config.js.timestamp-*
+vite.config.ts.timestamp-*
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea
