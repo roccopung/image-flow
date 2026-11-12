@@ -5,13 +5,15 @@
 		alignmentGuides,
 		CELL,
 		contentBounds,
+		intersects,
 		measure,
 		snapRect,
+		unionRect,
 		visibleMidpoint,
 		type Line,
 		type Rect
 	} from './snap.ts';
-	import type { Asset, Bridge, CanvasDoc, Item } from './types';
+	import type { Asset, Bridge, CanvasDoc, Item, Status } from './types';
 
 	type Point = { clientX: number; clientY: number };
 
@@ -50,10 +52,11 @@
 	let height = $state(1500);
 	let items = $state<Item[]>([]);
 	let assets = $state<Asset[]>([]);
-	let canPublish = $state(false);
+	let status = $state<Status>({ id: '', canvases: [], live: false, publishable: false });
 	let panel = $state<'assets' | 'lens'>('assets');
 
-	let selectedKey = $state<string | null>(null);
+	let selectedKeys = $state<string[]>([]);
+	let marquee = $state.raw<Rect | null>(null);
 	let hoveredKey = $state<string | null>(null);
 	let zoom = $state(1);
 	let mainWidth = $state(0);
@@ -84,9 +87,11 @@
 		Math.min(Math.max((fineSpacing - FINE_MIN_SCREEN_PX) / FINE_FADE_SCREEN_PX, 0), 1)
 	);
 	const gridStep = $derived(fineSpacing >= FINE_MIN_SCREEN_PX ? FINE_STEP : CELL);
-	const selectedItem = $derived(items.find((item) => item._key === selectedKey));
+	const selectedItems = $derived(items.filter((item) => selectedKeys.includes(item._key)));
+	const selectedItem = $derived(selectedItems.length === 1 ? selectedItems[0] : undefined);
+	const selection = $derived(selectedItems.length > 1 ? unionRect(selectedItems) : null);
 	const measuredItem = $derived(
-		items.find((item) => item._key === hoveredKey && item._key !== selectedKey)
+		items.find((item) => item._key === hoveredKey && !selectedKeys.includes(item._key))
 	);
 	const segments = $derived(
 		altHeld && selectedItem ? measure(selectedItem, measuredItem ?? bounds) : []
@@ -101,21 +106,44 @@
 	let scroller: HTMLElement;
 	let canvas: HTMLElement;
 	let surface: HTMLElement;
-	let grab = { offsetX: 0, offsetY: 0, clientX: 0, clientY: 0, moved: false };
+	let grab = {
+		x: 0,
+		y: 0,
+		clientX: 0,
+		clientY: 0,
+		moved: false,
+		box: { x: 0, y: 0, w: 0, h: 0 },
+		origins: [] as { item: Item; x: number; y: number }[]
+	};
+	let marqueeStart = { x: 0, y: 0 };
+	let marqueeBase: string[] = [];
 
 	onMount(() => {
 		bridge.listAssets().then((list) => (assets = list));
 	});
 
-	export function update(doc: CanvasDoc, publishable: boolean) {
-		canPublish = publishable;
+	function pickCanvas(select: HTMLSelectElement) {
+		if (select.value) return bridge.select(select.value);
+		const title = prompt('Canvas title')?.trim();
+		select.value = status.id;
+		if (title) bridge.create(title);
+	}
+
+	export function update(doc: CanvasDoc, next: Status) {
+		if (next.id !== status.id) {
+			centered = false;
+			selectedKeys = [];
+		}
+		status = next;
 		if (dragging) return;
 		width = doc.width ?? 1500;
 		height = doc.height ?? 1500;
 		items = doc.items ?? [];
 		if (!centered) lens = { x: width / 2, y: height / 2 };
 		centered = true;
-		if (selectedKey && !items.some((item) => item._key === selectedKey)) selectedKey = null;
+		const keys = new Set(items.map((item) => item._key));
+		if (!selectedKeys.every((key) => keys.has(key)))
+			selectedKeys = selectedKeys.filter((key) => keys.has(key));
 	}
 
 	const pctX = (value: number) => `${(value / width) * 100}%`;
@@ -159,8 +187,14 @@
 		);
 	}
 
-	function savePosition(item: Item) {
-		bridge.patch([{ set: { [`${itemPath(item)}.x`]: item.x, [`${itemPath(item)}.y`]: item.y } }]);
+	function savePositions(moved: Item[]) {
+		const set = Object.fromEntries(
+			moved.flatMap((item) => [
+				[`${itemPath(item)}.x`, item.x],
+				[`${itemPath(item)}.y`, item.y]
+			])
+		);
+		bridge.patch([{ set }]);
 	}
 
 	async function zoomTo(next: number, anchor = scrollerCenter()) {
@@ -242,14 +276,15 @@
 			...snap({ x: target.x - w / 2, y: target.y - h / 2, w, h }, items)
 		};
 		items.push(item);
-		selectedKey = item._key;
+		selectedKeys = [item._key];
 		bridge.patch([{ setIfMissing: { items: [] } }, { insert: { after: 'items[-1]', items: [item] } }]);
 	}
 
-	function remove(item: Item) {
-		items = items.filter((other) => other._key !== item._key);
-		selectedKey = null;
-		bridge.patch([{ unset: [itemPath(item)] }]);
+	function remove(targets: Item[]) {
+		const keys = targets.map((item) => item._key);
+		items = items.filter((other) => !keys.includes(other._key));
+		selectedKeys = [];
+		bridge.patch([{ unset: targets.map(itemPath) }]);
 		surface.focus({ preventScroll: true });
 	}
 
@@ -264,17 +299,24 @@
 
 	function startDrag(event: PointerEvent & { currentTarget: HTMLElement }, item: Item) {
 		if (event.button !== 0) return;
-		selectedKey = item._key;
-		dragging = true;
 		event.currentTarget.focus({ preventScroll: true });
+		if (event.shiftKey) {
+			selectedKeys = selectedKeys.includes(item._key)
+				? selectedKeys.filter((key) => key !== item._key)
+				: [...selectedKeys, item._key];
+			return;
+		}
+		if (!selectedKeys.includes(item._key)) selectedKeys = [item._key];
+		dragging = true;
 		event.currentTarget.setPointerCapture(event.pointerId);
 		const point = toCanvas(event);
 		grab = {
-			offsetX: point.x - item.x,
-			offsetY: point.y - item.y,
+			...point,
 			clientX: event.clientX,
 			clientY: event.clientY,
-			moved: false
+			moved: false,
+			box: unionRect(selectedItems),
+			origins: selectedItems.map((other) => ({ item: other, x: other.x, y: other.y }))
 		};
 	}
 
@@ -286,36 +328,68 @@
 		if (!grab.moved) return;
 
 		const point = toCanvas(event);
-		const others = items.filter((other) => other._key !== item._key);
+		const { box } = grab;
+		const others = items.filter((other) => !selectedKeys.includes(other._key));
 		const position = snap(
-			{ x: point.x - grab.offsetX, y: point.y - grab.offsetY, w: item.w, h: item.h },
+			{ x: box.x + point.x - grab.x, y: box.y + point.y - grab.y, w: box.w, h: box.h },
 			others
 		);
-		item.x = position.x;
-		item.y = position.y;
-		guides = snapToObjects ? alignmentGuides(item, others) : [];
+		for (const origin of grab.origins) {
+			origin.item.x = origin.x + position.x - box.x;
+			origin.item.y = origin.y + position.y - box.y;
+		}
+		guides = snapToObjects ? alignmentGuides({ ...box, ...position }, others) : [];
 	}
 
 	function endDrag(item: Item) {
+		if (!dragging) return;
 		dragging = false;
 		guides = [];
-		if (grab.moved) savePosition(item);
+		if (grab.moved) savePositions(grab.origins.map((origin) => origin.item));
+		else selectedKeys = [item._key];
 		grab.moved = false;
 	}
 
+	function startMarquee(event: PointerEvent & { currentTarget: HTMLElement }) {
+		if (event.button !== 0) return;
+		event.currentTarget.setPointerCapture(event.pointerId);
+		marqueeStart = toCanvas(event);
+		marqueeBase = event.shiftKey ? selectedKeys : [];
+		selectedKeys = marqueeBase;
+	}
+
+	function moveMarquee(event: PointerEvent & { currentTarget: HTMLElement }) {
+		if (!event.currentTarget.hasPointerCapture(event.pointerId)) return;
+		const point = toCanvas(event);
+		const area = {
+			x: Math.min(point.x, marqueeStart.x),
+			y: Math.min(point.y, marqueeStart.y),
+			w: Math.abs(point.x - marqueeStart.x),
+			h: Math.abs(point.y - marqueeStart.y)
+		};
+		const hits = items.filter((item) => intersects(item, area)).map((item) => item._key);
+		marquee = area;
+		selectedKeys = [...new Set([...marqueeBase, ...hits])];
+	}
+
 	function onItemKey(event: KeyboardEvent, item: Item) {
-		if (selectedKey !== item._key) return;
+		if (!selectedKeys.includes(item._key)) return;
 		const arrow = ARROWS[event.key];
 		if (arrow) {
 			event.preventDefault();
 			const step = event.shiftKey ? 10 : 1;
-			item.x = Math.min(Math.max(item.x + arrow[0] * step, 0), width - item.w);
-			item.y = Math.min(Math.max(item.y + arrow[1] * step, 0), height - item.h);
-			savePosition(item);
+			const box = unionRect(selectedItems);
+			const dx = Math.min(Math.max(arrow[0] * step, -box.x), width - box.w - box.x);
+			const dy = Math.min(Math.max(arrow[1] * step, -box.y), height - box.h - box.y);
+			for (const other of selectedItems) {
+				other.x += dx;
+				other.y += dy;
+			}
+			savePositions(selectedItems);
 		} else if (event.key === 'Delete' || event.key === 'Backspace') {
-			remove(item);
+			remove(selectedItems);
 		} else if (event.key === 'Escape') {
-			selectedKey = null;
+			selectedKeys = [];
 		}
 	}
 
@@ -365,11 +439,17 @@
 				class="surface"
 				aria-label="Deselect image"
 				bind:this={surface}
-				onclick={() => (selectedKey = null)}
+				onpointerdown={startMarquee}
+				onpointermove={moveMarquee}
+				onpointerup={() => (marquee = null)}
+				onpointercancel={() => (marquee = null)}
+				onclick={(event) => {
+					if (event.detail === 0) selectedKeys = [];
+				}}
 			></button>
 
 			{#each items as item (item._key)}
-				{@const selected = selectedKey === item._key}
+				{@const selected = selectedKeys.includes(item._key)}
 				{@const url = src(item, item.w * scale)}
 				<div
 					class={['image', { selected, measured: altHeld && measuredItem?._key === item._key }]}
@@ -387,7 +467,9 @@
 						onpointercancel={() => endDrag(item)}
 						onpointerenter={() => (hoveredKey = item._key)}
 						onpointerleave={() => (hoveredKey = null)}
-						onclick={() => (selectedKey = item._key)}
+						onclick={(event) => {
+							if (event.detail === 0) selectedKeys = [item._key];
+						}}
 						onkeydown={(event) => onItemKey(event, item)}
 					>
 						{#if url}
@@ -396,17 +478,40 @@
 							<span class="missing">Missing asset</span>
 						{/if}
 					</button>
-					{#if selected}
-						<button class="delete" aria-label="Delete image" onclick={() => remove(item)}>
-							<svg viewBox="0 0 10 10" aria-hidden="true">
-								<path d="M2.5 2.5l5 5M7.5 2.5l-5 5" stroke="currentColor" />
-							</svg>
-						</button>
+					{#if selected && !selection}
+						{@render deleteButton()}
 					{/if}
 				</div>
 			{/each}
 
+			{#if selection}
+				<div
+					class="selection"
+					style:left={pctX(selection.x)}
+					style:top={pctY(selection.y)}
+					style:width={pctX(selection.w)}
+					style:height={pctY(selection.h)}
+				>
+					{@render deleteButton()}
+				</div>
+			{/if}
+
+			{#snippet deleteButton()}
+				<button
+					class="delete"
+					aria-label="Delete {selectedItems.length > 1 ? 'images' : 'image'}"
+					onclick={() => remove(selectedItems)}
+				>
+					<svg viewBox="0 0 10 10" aria-hidden="true">
+						<path d="M2.5 2.5l5 5M7.5 2.5l-5 5" stroke="currentColor" />
+					</svg>
+				</button>
+			{/snippet}
+
 			<svg class="layer overlay" viewBox="0 0 {width} {height}" aria-hidden="true">
+				{#if marquee}
+					<rect class="marquee" x={marquee.x} y={marquee.y} width={marquee.w} height={marquee.h} />
+				{/if}
 				{#each guides as guide (lineKey(guide))}
 					<line class="guide" x1={guide.x1} y1={guide.y1} x2={guide.x2} y2={guide.y2} />
 				{/each}
@@ -466,7 +571,7 @@
 							style:top={pctY(item.y)}
 							style:width={pctX(item.w)}
 							style:height={pctY(item.h)}
-							style:z-index={selectedKey === item._key ? 1 : 0}
+							style:z-index={selectedKeys.includes(item._key) ? 1 : 0}
 						/>
 					{/each}
 				</div>
@@ -501,8 +606,21 @@
 	<details class="controls">
 		<summary>Controls</summary>
 		<div class="panel">
-			<button class="publish" disabled={!canPublish} onclick={() => bridge.publish()}>
-				{canPublish ? 'Publish' : 'Published'}
+			<label class="stack">
+				Choose canvas
+				<select value={status.id} onchange={(event) => pickCanvas(event.currentTarget)}>
+					{#each status.canvases as canvas (canvas._id)}
+						<option value={canvas._id}>{canvas.title?.trim() || 'Untitled'}</option>
+					{/each}
+					<option value="">+ New canvas</option>
+				</select>
+			</label>
+			<button
+				class="publish"
+				disabled={status.live && !status.publishable}
+				onclick={() => bridge.publish()}
+			>
+				{status.live && !status.publishable ? 'Published' : 'Publish'}
 			</button>
 			<div class="size">
 				<label>
@@ -532,7 +650,7 @@
 				<input type="checkbox" bind:checked={snapToObjects} />
 				Snap to objects
 			</label>
-			<label class="zoom">
+			<label class="stack">
 				Zoom {Math.round(zoom * 100)}%
 				<input
 					type="range"
@@ -543,7 +661,7 @@
 					oninput={(event) => zoomTo(event.currentTarget.valueAsNumber)}
 				/>
 			</label>
-			<label class="zoom">
+			<label class="stack">
 				Lens zoom {lensZoom}×
 				<input type="range" min="1" max="10" step="0.5" bind:value={lensZoom} />
 			</label>
@@ -592,6 +710,17 @@
 
 	input[type='checkbox']:checked {
 		background: #000;
+	}
+
+	select {
+		appearance: none;
+		padding: 0.25rem 1.25rem 0.25rem 0.25rem;
+		background: #fff url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" width="8" height="5"><path d="M0 0h8L4 5z"/></svg>') right 0.4rem center no-repeat;
+		cursor: pointer;
+		border: 1px solid #000;
+		border-radius: 0;
+		color: #000;
+		font: inherit;
 	}
 
 	input[type='number'] {
@@ -781,7 +910,7 @@
 		font-variant-numeric: tabular-nums;
 	}
 
-	.zoom {
+	.stack {
 		flex-direction: column;
 		align-items: stretch;
 		gap: 0.25rem;
@@ -845,7 +974,8 @@
 	}
 
 	.layer path,
-	.layer line {
+	.layer line,
+	.layer rect {
 		fill: none;
 		stroke-width: 1px;
 		vector-effect: non-scaling-stroke;
@@ -896,6 +1026,22 @@
 	.image.selected {
 		z-index: 1;
 		outline: 2px solid #000;
+	}
+
+	.selection {
+		position: absolute;
+		z-index: 1;
+		outline: 1px solid #000;
+		pointer-events: none;
+	}
+
+	.selection .delete {
+		pointer-events: auto;
+	}
+
+	.marquee {
+		stroke: #000;
+		stroke-dasharray: 3 3;
 	}
 
 	.image.measured {

@@ -12,8 +12,17 @@ export type Item = {
 
 export type CanvasDoc = { width?: number; height?: number; items?: Item[] };
 
+export type Status = {
+	id: string;
+	canvases: { _id: string; title?: string }[];
+	live: boolean;
+	publishable: boolean;
+};
+
 export type Bridge = {
 	listAssets(): Promise<Asset[]>;
+	select(id: string): void;
+	create(title: string): void;
 	patch(patches: object[]): void;
 	publish(): void;
 };

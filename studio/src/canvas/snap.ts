@@ -132,3 +132,17 @@ export function contentBounds(rects: Rect[]) {
 		h: Math.max(0, ...rects.map((r) => r.y + r.h))
 	};
 }
+
+export function unionRect(rects: Rect[]): Rect {
+	const x = Math.min(...rects.map((r) => r.x));
+	const y = Math.min(...rects.map((r) => r.y));
+	return {
+		x,
+		y,
+		w: Math.max(...rects.map((r) => r.x + r.w)) - x,
+		h: Math.max(...rects.map((r) => r.y + r.h)) - y
+	};
+}
+
+export const intersects = (a: Rect, b: Rect) =>
+	a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;

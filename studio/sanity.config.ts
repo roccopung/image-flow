@@ -18,7 +18,7 @@ export default defineConfig({
 			structure: (S) =>
 				S.list()
 					.title('Content')
-					.items(S.documentTypeListItems().filter((item) => item.getId() !== 'media.tag'))
+					.items(S.documentTypeListItems().filter((item) => !['media.tag', 'settings'].includes(item.getId()!)))
 		})
 	],
 	tools: (prev) => [canvasTool, ...prev],

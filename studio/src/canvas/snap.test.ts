@@ -1,7 +1,15 @@
 /// <reference types="node" />
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { alignmentGuides, contentBounds, measure, snapRect, visibleMidpoint } from './snap.ts';
+import {
+	alignmentGuides,
+	contentBounds,
+	intersects,
+	measure,
+	snapRect,
+	unionRect,
+	visibleMidpoint
+} from './snap.ts';
 
 const CANVAS = 1500;
 const CANVAS_RECT = { x: 0, y: 0, w: CANVAS, h: 1200 };
@@ -60,4 +68,10 @@ test('snap clamps to non-square bounds', () => {
 test('content bounds is the far corner of all items', () => {
 	assert.deepEqual(contentBounds([rect(10, 20), rect(500, 0, 100, 50)]), { w: 600, h: 120 });
 	assert.deepEqual(contentBounds([]), { w: 0, h: 0 });
+});
+
+test('union spans all rects; intersects counts any overlap but not touching edges', () => {
+	assert.deepEqual(unionRect([rect(100, 200), rect(400, 50, 20, 20)]), { x: 100, y: 50, w: 320, h: 250 });
+	assert.equal(intersects(rect(0, 0), rect(79, 99)), true);
+	assert.equal(intersects(rect(0, 0), rect(80, 0)), false);
 });

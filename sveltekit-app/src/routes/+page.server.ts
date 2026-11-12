@@ -4,7 +4,7 @@ import type { PageServerLoad } from './$types';
 
 export type Item = { _key: string; x: number; y: number; w: number; h: number; url: string };
 
-const QUERY = `*[_id == "canvas"][0]{
+const QUERY = `*[_id == "settings"][0].canvas->{
 	"width": coalesce(width, 1500),
 	"height": coalesce(height, 1500),
 	"items": items[defined(image.asset)]{_key, x, y, w, h, "url": image.asset->url}

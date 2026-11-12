@@ -23,5 +23,10 @@ export const schemaTypes = [
 			defineField({ name: 'height', type: 'number', initialValue: 1500 }),
 			defineField({ name: 'items', type: 'array', of: [canvasItem] })
 		]
+	}),
+	defineType({
+		name: 'settings',
+		type: 'document',
+		fields: [defineField({ name: 'canvas', type: 'reference', to: [{ type: 'canvas' }], weak: true })]
 	})
 ];
