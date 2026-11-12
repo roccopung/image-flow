@@ -297,8 +297,15 @@
 		bridge.patch([{ set: { [axis]: value } }]);
 	}
 
+	function jumpLens(event: PointerEvent) {
+		if (!event.metaKey && !event.ctrlKey) return false;
+		lens = toCanvas(event);
+		panel = 'lens';
+		return true;
+	}
+
 	function startDrag(event: PointerEvent & { currentTarget: HTMLElement }, item: Item) {
-		if (event.button !== 0) return;
+		if (event.button !== 0 || jumpLens(event)) return;
 		event.currentTarget.focus({ preventScroll: true });
 		if (event.shiftKey) {
 			selectedKeys = selectedKeys.includes(item._key)
@@ -351,7 +358,7 @@
 	}
 
 	function startMarquee(event: PointerEvent & { currentTarget: HTMLElement }) {
-		if (event.button !== 0) return;
+		if (event.button !== 0 || jumpLens(event)) return;
 		event.currentTarget.setPointerCapture(event.pointerId);
 		marqueeStart = toCanvas(event);
 		marqueeBase = event.shiftKey ? selectedKeys : [];
@@ -539,7 +546,16 @@
 			{/each}
 
 			{#if panel === 'lens'}
-				<span class="lens-dot" style:left={pctX(lens.x)} style:top={pctY(lens.y)}></span>
+				<svg
+					class="lens-dot"
+					width="5"
+					height="5"
+					aria-hidden="true"
+					style:left={pctX(lens.x)}
+					style:top={pctY(lens.y)}
+				>
+					<path d="M2.5 0v5M0 2.5h5" stroke="red" />
+				</svg>
 			{/if}
 		</div>
 	</div>
@@ -669,6 +685,7 @@
 			<p>Select an image, then hold <kbd>Alt</kbd> and point at another to measure.</p>
 			<p><kbd>Arrows</kbd> nudge the selected image 1px, with <kbd>Shift</kbd> 10px.</p>
 			<p>In Lens, <kbd>Arrows</kbd> move the view.</p>
+			<p><kbd>Cmd</kbd>-click the canvas to jump the Lens there.</p>
 		</div>
 	</details>
 </main>
@@ -858,10 +875,6 @@
 	.lens-dot {
 		position: absolute;
 		z-index: 3;
-		width: 2px;
-		height: 2px;
-		border-radius: 50%;
-		background: red;
 		transform: translate(-50%, -50%);
 		pointer-events: none;
 	}

@@ -71,6 +71,14 @@
 		}
 	}
 
+	function jump(event: MouseEvent & { currentTarget: HTMLElement }) {
+		const rect = event.currentTarget.getBoundingClientRect();
+		lens = {
+			x: ((event.clientX - rect.left) / rect.width) * width,
+			y: ((event.clientY - rect.top) / rect.height) * height
+		};
+	}
+
 	function onKey(event: KeyboardEvent) {
 		if (!ARROWS[event.key]) return;
 		event.preventDefault();
@@ -89,6 +97,8 @@
 	<div class="map">
 		<div
 			class="canvas"
+			role="presentation"
+			onclick={jump}
 			bind:clientWidth={mapWidth}
 			style:aspect-ratio="{width} / {height}"
 			style:width="min(100%, calc(100dvh * {width} / {height}))"
@@ -103,7 +113,16 @@
 					style:height={pctY(item.h)}
 				/>
 			{/each}
-			<span class="dot" style:left={pctX(lens.x)} style:top={pctY(lens.y)}></span>
+			<svg
+				class="cross"
+				width="5"
+				height="5"
+				aria-hidden="true"
+				style:left={pctX(lens.x)}
+				style:top={pctY(lens.y)}
+			>
+				<path d="M2.5 0v5M0 2.5h5" stroke="red" />
+			</svg>
 		</div>
 	</div>
 
@@ -182,6 +201,7 @@
 		position: relative;
 		overflow: clip;
 		background: #fff;
+		cursor: crosshair;
 	}
 
 	.canvas img,
@@ -191,12 +211,8 @@
 		object-fit: contain;
 	}
 
-	.dot {
+	.cross {
 		position: absolute;
-		width: 2px;
-		height: 2px;
-		border-radius: 50%;
-		background: red;
 		transform: translate(-50%, -50%);
 	}
 
