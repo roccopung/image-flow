@@ -25,8 +25,6 @@
 	const FINE_STEP = 10;
 	const FINE_MIN_SCREEN_PX = 8;
 	const FINE_FADE_SCREEN_PX = 4;
-	const LENS_SCREEN_PX_PER_S = 600;
-	const LENS_KEY_STEP = 50;
 	const LENS_IMAGE_WIDTH = 1800;
 	const ARROWS: Record<string, [number, number]> = {
 		ArrowLeft: [-1, 0],
@@ -34,12 +32,6 @@
 		ArrowUp: [0, -1],
 		ArrowDown: [0, 1]
 	};
-	const LENS_BUTTONS = [
-		['ArrowLeft', 'left', '←'],
-		['ArrowUp', 'up', '↑'],
-		['ArrowDown', 'down', '↓'],
-		['ArrowRight', 'right', '→']
-	] as const;
 
 	function gridPath(step: number, w: number, h: number) {
 		let path = '';
@@ -71,7 +63,6 @@
 	let snapToGrid = $state(true);
 	let snapToObjects = $state(true);
 	let altHeld = $state(false);
-	let steering = $state<string[]>([]);
 	let guides = $state.raw<Line[]>([]);
 
 	const bounds = $derived<Rect>({ x: 0, y: 0, w: width, h: height });
@@ -101,8 +92,6 @@
 
 	let dragging = false;
 	let centered = false;
-	let frame = 0;
-	let lastFrame = 0;
 	let scroller: HTMLElement;
 	let canvas: HTMLElement;
 	let surface: HTMLElement;
@@ -117,6 +106,7 @@
 	};
 	let marqueeStart = { x: 0, y: 0 };
 	let marqueeBase: string[] = [];
+	let hover: Point | null = null;
 
 	onMount(() => {
 		bridge.listAssets().then((list) => (assets = list));
@@ -208,45 +198,10 @@
 			(point.y / height) * canvas.offsetHeight + canvas.offsetTop - (anchor.clientY - rect.top);
 	}
 
-	function moveLens(dx: number, dy: number) {
-		lens = {
-			x: Math.min(Math.max(lens.x + dx, 0), width),
-			y: Math.min(Math.max(lens.y + dy, 0), height)
-		};
-	}
-
-	function glide(now: number) {
-		const distance = (LENS_SCREEN_PX_PER_S * (now - lastFrame)) / 1000 / lensZoom;
-		lastFrame = now;
-		const [dx, dy] = steering.reduce(
-			([x, y], key) => [x + ARROWS[key][0], y + ARROWS[key][1]],
-			[0, 0]
-		);
-		moveLens(dx * distance, dy * distance);
-		frame = steering.length ? requestAnimationFrame(glide) : 0;
-	}
-
-	function steer(key: string, on: boolean) {
-		steering = on
-			? steering.includes(key) ? steering : [...steering, key]
-			: steering.filter((other) => other !== key);
-		if (steering.length && !frame) {
-			lastFrame = performance.now();
-			frame = requestAnimationFrame(glide);
-		}
-	}
-
-	function onWindowKey(event: KeyboardEvent) {
-		syncAlt(event);
-		const typing = event.target instanceof HTMLInputElement;
-		if (panel !== 'lens' || !ARROWS[event.key] || event.defaultPrevented || typing) return;
-		event.preventDefault();
-		steer(event.key, event.type === 'keydown');
-	}
-
 	function onScroll() {
 		scrollLeft = scroller.scrollLeft;
 		scrollTop = scroller.scrollTop;
+		follow();
 	}
 
 	function pinch(event: WheelEvent) {
@@ -297,15 +252,18 @@
 		bridge.patch([{ set: { [axis]: value } }]);
 	}
 
-	function jumpLens(event: PointerEvent) {
-		if (!event.metaKey && !event.ctrlKey) return false;
-		lens = toCanvas(event);
-		panel = 'lens';
-		return true;
+	function follow(event?: Point) {
+		hover = event ?? hover;
+		if (!hover || panel !== 'lens') return;
+		const point = toCanvas(hover);
+		lens = {
+			x: Math.min(Math.max(point.x, 0), width),
+			y: Math.min(Math.max(point.y, 0), height)
+		};
 	}
 
 	function startDrag(event: PointerEvent & { currentTarget: HTMLElement }, item: Item) {
-		if (event.button !== 0 || jumpLens(event)) return;
+		if (event.button !== 0) return;
 		event.currentTarget.focus({ preventScroll: true });
 		if (event.shiftKey) {
 			selectedKeys = selectedKeys.includes(item._key)
@@ -358,7 +316,7 @@
 	}
 
 	function startMarquee(event: PointerEvent & { currentTarget: HTMLElement }) {
-		if (event.button !== 0 || jumpLens(event)) return;
+		if (event.button !== 0) return;
 		event.currentTarget.setPointerCapture(event.pointerId);
 		marqueeStart = toCanvas(event);
 		marqueeBase = event.shiftKey ? selectedKeys : [];
@@ -406,13 +364,10 @@
 </script>
 
 <svelte:window
-	onkeydown={onWindowKey}
-	onkeyup={onWindowKey}
+	onkeydown={syncAlt}
+	onkeyup={syncAlt}
 	onpointermove={syncAlt}
-	onblur={() => {
-		altHeld = false;
-		steering = [];
-	}}
+	onblur={() => (altHeld = false)}
 />
 
 <main bind:clientWidth={mainWidth} bind:clientHeight={mainHeight}>
@@ -425,6 +380,8 @@
 		bind:clientHeight={viewHeight}
 		onwheel={pinch}
 		onscroll={onScroll}
+		onpointermove={(event) => follow(event)}
+		onpointerleave={() => (hover = null)}
 		ondragover={onDragOver}
 		ondrop={onDrop}
 	>
@@ -591,24 +548,6 @@
 						/>
 					{/each}
 				</div>
-				<div class="joystick">
-					{#each LENS_BUTTONS as [key, label, glyph] (key)}
-						<button
-							aria-label="Move {label}"
-							aria-pressed={steering.includes(key)}
-							onpointerdown={(event) => {
-								event.currentTarget.setPointerCapture(event.pointerId);
-								steer(key, true);
-							}}
-							onpointerup={() => steer(key, false)}
-							onpointercancel={() => steer(key, false)}
-							onclick={(event) => {
-								if (event.detail === 0)
-									moveLens(ARROWS[key][0] * LENS_KEY_STEP, ARROWS[key][1] * LENS_KEY_STEP);
-							}}>{glyph}</button
-						>
-					{/each}
-				</div>
 			</div>
 		{/if}
 	</div>
@@ -680,8 +619,7 @@
 			<p>Drag images from Assets onto the canvas.</p>
 			<p>Select an image, then hold <kbd>Alt</kbd> and point at another to measure.</p>
 			<p><kbd>Arrows</kbd> nudge the selected image 1px, with <kbd>Shift</kbd> 10px.</p>
-			<p>In Lens, <kbd>Arrows</kbd> move the view.</p>
-			<p><kbd>Cmd</kbd>-click the canvas to jump the Lens there.</p>
+			<p>In Lens, the view follows the pointer over the canvas.</p>
 		</div>
 	</details>
 </main>
@@ -875,35 +813,9 @@
 		pointer-events: none;
 	}
 
-	.joystick {
-		position: absolute;
-		bottom: 0.75rem;
-		left: 50%;
-		display: flex;
-		transform: translateX(-50%);
-	}
 
-	.joystick button {
-		width: 24px;
-		height: 24px;
-		padding: 0;
-		border: 1px solid #000;
-		border-radius: 0;
-		background: #dfdfdf;
-		color: #000;
-		font: inherit;
-		cursor: pointer;
-		touch-action: none;
-	}
 
-	.joystick button + button {
-		border-left: 0;
-	}
 
-	.joystick button[aria-pressed='true'] {
-		background: #000;
-		color: #fff;
-	}
 
 
 	label {

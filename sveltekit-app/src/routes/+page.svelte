@@ -14,10 +14,10 @@
 		ArrowDown: [0, 1]
 	};
 	const BUTTONS = [
-		['ArrowLeft', 'left', '←'],
-		['ArrowUp', 'up', '↑'],
-		['ArrowDown', 'down', '↓'],
-		['ArrowRight', 'right', '→']
+		['ArrowUp', 'up', '1 / 2', -90],
+		['ArrowLeft', 'left', '2 / 1', 180],
+		['ArrowRight', 'right', '2 / 3', 0],
+		['ArrowDown', 'down', '3 / 2', 90]
 	] as const;
 
 	const width = $derived(data.width);
@@ -26,6 +26,7 @@
 	let mapWidth = $state(0);
 	let lens = $derived({ x: width / 2, y: height / 2 });
 	let steering = $state<string[]>([]);
+	let pinned = $state(false);
 	let dpr = $state(1);
 	let frame = 0;
 	let lastFrame = 0;
@@ -42,6 +43,7 @@
 	}
 
 	function moveLens(dx: number, dy: number) {
+		pinned = true;
 		lens = {
 			x: Math.min(Math.max(lens.x + dx, 0), width),
 			y: Math.min(Math.max(lens.y + dy, 0), height)
@@ -98,7 +100,13 @@
 		<div
 			class="canvas"
 			role="presentation"
-			onclick={jump}
+			onpointermove={(event) => {
+				if (!pinned) jump(event);
+			}}
+			onclick={(event) => {
+				jump(event);
+				pinned = !pinned;
+			}}
 			bind:clientWidth={mapWidth}
 			style:aspect-ratio="{width} / {height}"
 			style:width="min(100%, calc(100dvh * {width} / {height}))"
@@ -149,9 +157,10 @@
 			{/each}
 		</div>
 		<div class="joystick">
-			{#each BUTTONS as [key, label, glyph] (key)}
+			{#each BUTTONS as [key, label, area, angle] (key)}
 				<button
 					aria-label="Move {label}"
+					style:grid-area={area}
 					aria-pressed={steering.includes(key)}
 					onpointerdown={(event) => {
 						event.currentTarget.setPointerCapture(event.pointerId);
@@ -162,8 +171,10 @@
 					onclick={(event) => {
 						if (event.detail === 0)
 							moveLens(ARROWS[key][0] * LENS_KEY_STEP, ARROWS[key][1] * LENS_KEY_STEP);
-					}}>{glyph}</button
+					}}
 				>
+					<img src="/Play.svg" alt="" style:rotate="{angle}deg" />
+				</button>
 			{/each}
 		</div>
 	</div>
@@ -231,29 +242,28 @@
 		position: absolute;
 		bottom: 0.75rem;
 		left: 50%;
-		display: flex;
+		display: grid;
+		grid-template: repeat(3, 12px) / repeat(3, 12px);
+		padding: 2px;
+		background: #dfdfdf;
 		transform: translateX(-50%);
 	}
 
 	.joystick button {
-		width: 24px;
-		height: 24px;
+		display: grid;
+		place-items: center;
 		padding: 0;
-		border: 1px solid #000;
-		border-radius: 0;
-		background: #dfdfdf;
-		color: #000;
-		font: inherit;
+		border: 0;
+		background: none;
 		cursor: pointer;
 		touch-action: none;
 	}
 
-	.joystick button + button {
-		border-left: 0;
+	.joystick img {
+		display: block;
 	}
 
-	.joystick button[aria-pressed='true'] {
-		background: #000;
-		color: #fff;
+	.joystick button[aria-pressed='true'] img {
+		opacity: 0.4;
 	}
 </style>
